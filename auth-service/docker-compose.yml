@@ -1,0 +1,53 @@
+services:
+  mysql-auth-db:
+    image: mysql:8.0
+    container_name: mysql-auth-db
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: auth_db
+      MYSQL_USER: auth_user
+      MYSQL_PASSWORD: auth_password
+      MYSQL_ROOT_PASSWORD: auth_root_password
+    ports:
+      - "3308:3306"
+    volumes:
+      - mysql-auth-standalone-data:/var/lib/mysql
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "127.0.0.1" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+    networks:
+      - auth_net
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: auth-service
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    environment:
+      DB_HOST: mysql-auth-db
+      DB_PORT: 3306
+      DB_NAME: auth_db
+      DB_USER: auth_user
+      DB_PASSWORD: auth_password
+      PORT: 8082
+      JWT_SECRET: mySecretJwtSigningKeyEnergyManagementSystem2026DistributedSystemsAssignment
+      JWT_EXPIRATION: 86400
+      USER_SERVICE_URL: http://host.docker.internal:8080/user
+    depends_on:
+      mysql-auth-db:
+        condition: service_healthy
+    networks:
+      - auth_net
+
+volumes:
+  mysql-auth-standalone-data:
+
+networks:
+  auth_net:
+    driver: bridge

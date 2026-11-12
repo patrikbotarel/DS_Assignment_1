@@ -1,0 +1,234 @@
+services:
+  # ------------------------------------------------
+  # API GATEWAY / REVERSE PROXY (TRAEFIK)
+  # ------------------------------------------------
+  traefik:
+    image: traefik:v3.7.17
+    container_name: traefik
+    restart: unless-stopped
+    user: root
+    command:
+      - "--api.insecure=true"
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.endpoint=unix:///var/run/docker.sock"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=demo_net"
+      - "--entrypoints.web.address=:80"
+      - "--log.level=DEBUG"
+    ports:
+      - "80:80"
+      - "8090:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    networks:
+      - demo_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=demo_net"
+      - "traefik.http.middlewares.auth-forward.forwardauth.address=http://auth-service:8082/auth/validate"
+      - "traefik.http.middlewares.auth-forward.forwardauth.authResponseHeaders=X-User-Id,X-User-Role,X-User-Name"
+    depends_on:
+      - auth-service
+      - user-service
+      - device-service
+
+  # ------------------------------------------------
+  # USER MANAGEMENT MICROSERVICE & DATABASE
+  # ------------------------------------------------
+  mysql-db:
+    image: mysql:8.0
+    container_name: mysql-db
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: energy_db
+      MYSQL_USER: energy_user
+      MYSQL_PASSWORD: energy_password
+      MYSQL_ROOT_PASSWORD: root_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-user-data:/var/lib/mysql
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "127.0.0.1" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+    networks:
+      - demo_net
+
+  user-service:
+    build:
+      context: ./spring-demo-java25
+      dockerfile: Dockerfile
+    container_name: user-service
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      DB_HOST: mysql-db
+      DB_PORT: 3306
+      DB_NAME: energy_db
+      DB_USER: energy_user
+      DB_PASSWORD: energy_password
+      PORT: 8080
+      DEVICE_SERVICE_URL: http://device-service:8081/device
+      DEVICE_SERVICE_SYNC_ENABLED: "true"
+      AUTH_SERVICE_URL: http://auth-service:8082/auth
+      AUTH_SERVICE_SYNC_ENABLED: "true"
+      JWT_SECRET: mySecretJwtSigningKeyEnergyManagementSystem2026DistributedSystemsAssignment
+    depends_on:
+      mysql-db:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+    networks:
+      - demo_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=demo_net"
+      - "traefik.http.routers.user-service.rule=PathPrefix(`/user`)"
+      - "traefik.http.routers.user-service.entrypoints=web"
+      - "traefik.http.routers.user-service.middlewares=auth-forward@docker"
+      - "traefik.http.services.user-service.loadbalancer.server.port=8080"
+
+  # ------------------------------------------------
+  # DEVICE MANAGEMENT MICROSERVICE & DATABASE
+  # ------------------------------------------------
+  mysql-device-db:
+    image: mysql:8.0
+    container_name: mysql-device-db
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: device_db
+      MYSQL_USER: device_user
+      MYSQL_PASSWORD: device_password
+      MYSQL_ROOT_PASSWORD: device_root_password
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql-device-data:/var/lib/mysql
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "127.0.0.1" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+    networks:
+      - demo_net
+
+  device-service:
+    build:
+      context: ./device-service
+      dockerfile: Dockerfile
+    container_name: device-service
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      DB_HOST: mysql-device-db
+      DB_PORT: 3306
+      DB_NAME: device_db
+      DB_USER: device_user
+      DB_PASSWORD: device_password
+      PORT: 8081
+      JWT_SECRET: mySecretJwtSigningKeyEnergyManagementSystem2026DistributedSystemsAssignment
+    depends_on:
+      mysql-device-db:
+        condition: service_healthy
+    networks:
+      - demo_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=demo_net"
+      - "traefik.http.routers.device-service.rule=PathPrefix(`/device`)"
+      - "traefik.http.routers.device-service.entrypoints=web"
+      - "traefik.http.routers.device-service.middlewares=auth-forward@docker"
+      - "traefik.http.services.device-service.loadbalancer.server.port=8081"
+
+  # ------------------------------------------------
+  # AUTHORIZATION MICROSERVICE & DATABASE
+  # ------------------------------------------------
+  mysql-auth-db:
+    image: mysql:8.0
+    container_name: mysql-auth-db
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: auth_db
+      MYSQL_USER: auth_user
+      MYSQL_PASSWORD: auth_password
+      MYSQL_ROOT_PASSWORD: auth_root_password
+    ports:
+      - "3308:3306"
+    volumes:
+      - mysql-auth-data:/var/lib/mysql
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "127.0.0.1" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+    networks:
+      - demo_net
+
+  auth-service:
+    build:
+      context: ./auth-service
+      dockerfile: Dockerfile
+    container_name: auth-service
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    environment:
+      DB_HOST: mysql-auth-db
+      DB_PORT: 3306
+      DB_NAME: auth_db
+      DB_USER: auth_user
+      DB_PASSWORD: auth_password
+      PORT: 8082
+      JWT_SECRET: mySecretJwtSigningKeyEnergyManagementSystem2026DistributedSystemsAssignment
+      JWT_EXPIRATION: 86400
+      USER_SERVICE_URL: http://user-service:8080/user
+    depends_on:
+      mysql-auth-db:
+        condition: service_healthy
+    networks:
+      - demo_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=demo_net"
+      - "traefik.http.routers.auth-service.rule=PathPrefix(`/auth`)"
+      - "traefik.http.routers.auth-service.entrypoints=web"
+      - "traefik.http.services.auth-service.loadbalancer.server.port=8082"
+
+  # ------------------------------------------------
+  # FRONTEND (REACT WEB CLIENT)
+  # ------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    networks:
+      - demo_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=demo_net"
+      - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.frontend.priority=1"
+      - "traefik.http.routers.frontend.entrypoints=web"
+      - "traefik.http.services.frontend.loadbalancer.server.port=80"
+
+volumes:
+  mysql-user-data:
+  mysql-device-data:
+  mysql-auth-data:
+
+networks:
+  demo_net:
+    name: demo_net
+    driver: bridge
